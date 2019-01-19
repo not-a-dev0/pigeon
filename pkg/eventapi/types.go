@@ -1,6 +1,9 @@
 package eventapi
 
-import "github.com/dgrijalva/jwt-go"
+import (
+	"github.com/dgrijalva/jwt-go"
+	"github.com/streadway/amqp"
+)
 
 type Event map[string]interface{}
 
@@ -32,4 +35,9 @@ type User struct {
 	Level int    `json:"level"`
 	Otp   bool   `json:"otp_enabled"`
 	State string `json:"state"`
+}
+
+type EventHandler interface {
+	Handle(event Event) error
+	Consume() (<-chan amqp.Delivery, error)
 }

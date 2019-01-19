@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
-	"io/ioutil"
-	"log"
 )
 
 import (
@@ -13,12 +11,14 @@ import (
 	"github.com/shal/pigeon/pkg/consumer"
 	"github.com/shal/pigeon/pkg/eventapi"
 	"github.com/shal/pigeon/pkg/utils"
+	"github.com/streadway/amqp"
 )
 
 const (
 	routingKey = "user.email.confirmation.token"
 	exchange   = "barong.events.system"
 )
+
 func amqpURI() string {
 	host := utils.GetEnv("RABBITMQ_HOST", "localhost")
 	port := utils.GetEnv("RABBITMQ_PORT", "5672")
@@ -28,7 +28,9 @@ func amqpURI() string {
 	return fmt.Sprintf("amqp://%s:%s@%s:%s/", username, password, host, port)
 }
 
-func procRecord(r eventapi.Event) error {
+type Consumer struct{}
+
+func (Consumer) Handle(event eventapi.Event) error {
 	// Decode map[string]interface{} to AccountRecord.
 	acc := AccountCreatedEvent{}
 
@@ -42,7 +44,7 @@ func procRecord(r eventapi.Event) error {
 		return err
 	}
 
-	if err := dec.Decode(r); err != nil {
+	if err := dec.Decode(event); err != nil {
 		return err
 	}
 
@@ -72,17 +74,14 @@ func procRecord(r eventapi.Event) error {
 	return nil
 }
 
-func Run() {
+func (Consumer) Consume() (<-chan amqp.Delivery, error) {
 	amqpUri := amqpURI()
-
-	utils.MustGetEnv("JWT_PUBLIC_KEY")
-	utils.MustGetEnv("SENDGRID_API_KEY")
 
 	c := consumer.New(amqpUri, exchange, routingKey)
 	queue := c.DeclareQueue()
 	c.BindQueue(queue)
 
-	deliveries, err := c.Channel.Consume(
+	return c.Channel.Consume(
 		queue.Name,
 		c.Tag,
 		true,
@@ -91,42 +90,4 @@ func Run() {
 		false,
 		nil,
 	)
-
-	if err != nil {
-		log.Panicf("Consuming: %s", err.Error())
-	}
-
-	forever := make(chan bool)
-
-	go func() {
-		for delivery := range deliveries {
-			jwtReader, err := eventapi.DeliveryAsJWT(delivery)
-
-			if err != nil {
-				log.Println(err)
-				return
-			}
-
-			jwt, err := ioutil.ReadAll(jwtReader)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-
-			log.Printf("Token: %s\n", string(jwt))
-
-			claims, err := eventapi.ParseJWT(string(jwt), eventapi.ValidateJWT)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-
-			if err := procRecord(claims.Event); err != nil {
-				log.Printf("Consuming: %s\n", err.Error())
-			}
-		}
-	}()
-
-	log.Printf(" [*] Waiting for events. To exit press CTRL+C")
-	<-forever
 }

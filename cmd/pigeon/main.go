@@ -1,9 +1,11 @@
 package main
 
 import (
+	"github.com/shal/pigeon/pkg/consumer"
 	"github.com/shal/pigeon/pkg/mailconsumer"
 )
 
 func main() {
-	mailconsumer.Run()
+	mailConsumer := mailconsumer.Consumer{}
+	consumer.ListenAndServe(mailConsumer)
 }

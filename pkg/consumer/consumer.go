@@ -1,10 +1,13 @@
 package consumer
 
 import (
+	"io/ioutil"
 	"log"
 )
 
 import (
+	"github.com/shal/pigeon/pkg/eventapi"
+	"github.com/shal/pigeon/pkg/utils"
 	"github.com/streadway/amqp"
 )
 
@@ -92,4 +95,50 @@ func New(uri, exchange, key string) *Consumer {
 	}
 
 	return consumer
+}
+
+func ListenAndServe(handlers ...eventapi.EventHandler) {
+	utils.MustGetEnv("JWT_PUBLIC_KEY")
+	utils.MustGetEnv("SENDGRID_API_KEY")
+
+	for _, handler := range handlers {
+		deliveries, err := handler.Consume()
+
+		if err != nil {
+			log.Panicf("Consuming: %s", err.Error())
+		}
+
+		go func() {
+			for delivery := range deliveries {
+				jwtReader, err := eventapi.DeliveryAsJWT(delivery)
+
+				if err != nil {
+					log.Println(err)
+					return
+				}
+
+				jwt, err := ioutil.ReadAll(jwtReader)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+
+				log.Printf("Token: %s\n", string(jwt))
+
+				claims, err := eventapi.ParseJWT(string(jwt), eventapi.ValidateJWT)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+
+				if err := handler.Handle(claims.Event); err != nil {
+					log.Printf("Consuming: %s\n", err.Error())
+				}
+			}
+		}()
+	}
+
+	forever := make(chan bool)
+	log.Printf("[*] Waiting for events. To exit press CTRL+C")
+	<-forever
 }
